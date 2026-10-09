@@ -280,7 +280,20 @@ html[data-scene="gacha"] .hall,html[data-scene="end"] .hall{opacity:.5}
 .opt:disabled{cursor:default}
 .opt-letter{flex:none;width:2.3em;height:2.3em;border-radius:50%;display:grid;place-items:center;font:900 1em/1 var(--font-display);border:2px solid var(--gold);background:var(--red);color:var(--cream)}
 .opt:nth-child(even) .opt-letter{background:var(--black)}
-.opt-text{min-width:0}
+.opt-text{flex:1 1 auto;min-width:0}
+/* Anti-photo text: drawn as moving dots, so a still photo shows only noise */
+.ktext{display:block;position:relative}
+.ktext canvas{display:block;width:100%}
+.q-text.ktext{font-weight:900}
+.opt-text.ktext{font-weight:800}
+.q-panel.anti .opt{font-size:calc(clamp(1.15rem,2.1cqw,1.55rem) * var(--qs,1))}
+html.portrait .q-panel.anti .opt{font-size:calc(1.12rem * var(--qs,1))}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.q-foot{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap}
+.anti-chip{display:inline-flex;align-items:center;gap:.45em;font:700 .8rem/1.2 var(--font-body);color:var(--glow);background:var(--panel);border:1.5px solid var(--gold-deep);border-radius:999px;padding:.5em .9em;cursor:pointer;margin-left:auto}
+.anti-chip[aria-pressed="false"]{color:var(--muted);border-style:dashed}
+.anti-chip svg{width:1.15em;height:1.15em;flex:none}
+.anti-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .opt.picked{border-color:var(--glow);background:var(--gold-deep);animation:pickpulse .45s ease-in-out infinite alternate}
 @keyframes pickpulse{to{box-shadow:0 0 24px var(--gold-soft)}}
 .opt.correct{background:var(--good);border-color:var(--good-light);color:var(--ink);animation:none;box-shadow:0 0 26px var(--good)}
@@ -641,7 +654,10 @@ html.compact .end-total{font-size:.95rem}
           </div>
           <button class="btn-gold" id="nextBtn" type="button">Chọn nhóm tiếp theo</button>
         </div>
-        <p class="hint" id="qKeys">Bấm vào đáp án hoặc phím A, B, C, D. Chọn sai mất 1 phần quà, được chọn tiếp tới khi đúng.</p>
+        <div class="q-foot">
+          <p class="hint" id="qKeys">Bấm vào đáp án hoặc phím A, B, C, D. Chọn sai mất 1 phần quà, được chọn tiếp tới khi đúng.</p>
+          <button class="anti-chip" id="antiChip" type="button" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8.5 12l2.4 2.4 4.6-4.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="antiLabel">Chống chụp ảnh: Bật</span></button>
+        </div>
       </div>
     </section>
 
@@ -699,6 +715,12 @@ html.compact .end-total{font-size:.95rem}
     <div class="field">
       <span class="field-label">Nhóm trong gói thẻ. Bấm để bỏ ra, ví dụ nhóm đang thuyết trình.</span>
       <div class="tags" id="tags"></div>
+    </div>
+    <div class="field">
+      <div class="anti-row">
+        <span class="field-label" id="lblAnti">Chống chụp ảnh gửi AI · chữ câu hỏi và đáp án chỉ đọc được khi nhìn màn hình đang chạy, ảnh chụp chỉ thấy chấm nhiễu</span>
+        <button class="btn sm" id="antiToggle" type="button" aria-pressed="true" aria-labelledby="lblAnti antiToggle">Đang bật</button>
+      </div>
     </div>
     <div class="field" id="qSection">
       <span class="field-label" id="lblQuestions">Câu hỏi · mỗi nhóm được gọi nhận một câu, câu đặc biệt luôn dành cho nhóm cuối</span>
@@ -806,9 +828,9 @@ html.compact .end-total{font-size:.95rem}
   function defaults(keep) {
     const k = keep || {};
     return { groupCount: k.groupCount || 8, excluded: (k.excluded || []).slice(), target: k.target || 4, picked: [],
-             bank: cloneBank(k.bank || DEFAULT_BANK), sound: k.sound !== false, scene: 'gacha', active: -1 };
+             bank: cloneBank(k.bank || DEFAULT_BANK), sound: k.sound !== false, anti: k.anti !== false, scene: 'gacha', active: -1 };
   }
-  const newPick = (g, batch) => ({ g, batch, points: START, q: null, ord: null, result: null, choice: null, wrong: [], startedAt: null, time: null });
+  const newPick = (g, batch) => ({ g, batch, points: START, q: null, ord: null, result: null, choice: null, wrong: [], perm: null, startedAt: null, time: null });
   function clampInt(v, min, max, fb) { v = Number(v); return Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fb; }
   const txt = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
   function sanitizeBank(b) {
@@ -842,6 +864,7 @@ html.compact .end-total{font-size:.95rem}
                    choice: Number.isInteger(p.choice) ? p.choice : null,
                    wrong: Array.isArray(p.wrong) ? p.wrong.filter(x => Number.isInteger(x) && x >= 0 && x < 4) : [],
                    startedAt: Number.isFinite(p.startedAt) ? p.startedAt : null,
+                   perm: Array.isArray(p.perm) && p.perm.length === 4 && [0, 1, 2, 3].every(x => p.perm.includes(x)) ? p.perm.slice() : null,
                    time: Number.isFinite(p.time) ? p.time : null })) : [];
     const seen = new Set();
     picked.forEach(p => { if (p.q != null) { if (seen.has(p.q)) { p.q = null; p.ord = null; } else seen.add(p.q); } if (p.q == null) p.result = null; });
@@ -854,6 +877,7 @@ html.compact .end-total{font-size:.95rem}
       picked,
       bank,
       sound: s.sound !== false,
+      anti: s.anti !== false,
       scene: ['gacha', 'question', 'end'].includes(s.scene) ? s.scene : 'gacha',
       active: Number.isInteger(s.active) ? s.active : -1
     };
@@ -1536,7 +1560,7 @@ html.compact .end-total{font-size:.95rem}
     el.classList.remove('enter'); void el.offsetWidth; el.classList.add('enter');
     visibleScene = s;
     document.documentElement.dataset.scene = s;
-    if (s !== 'question') { timer = null; qLive = null; }
+    if (s !== 'question') { timer = null; qLive = null; kClear(); }
     if (s !== 'end') clearReveal();
     if (s === 'gacha') {
       state.active = -1;
@@ -1578,6 +1602,7 @@ html.compact .end-total{font-size:.95rem}
     $('qLabel').textContent = q.type === 'open' ? `Câu ${p.ord}/${state.target} · Câu hỏi đặc biệt` : `Câu ${p.ord}/${state.target}`;
     $('qTeam').textContent = `Nhóm ${p.g}`;
     setGifts($('qGifts'), p.points, -1);
+    kClear();
     $('qText').textContent = q.text;
     $('qNote').hidden = q.type !== 'open';
     $('qKeys').hidden = q.type !== 'mc';
@@ -1586,11 +1611,12 @@ html.compact .end-total{font-size:.95rem}
     opts.innerHTML = '';
     opts.hidden = q.type !== 'mc';
     if (q.type === 'mc') {
-      q.opts.forEach((o, k) => {
+      const order = permFor(p);
+      order.forEach((o, k) => {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'opt'; b.id = `opt-${k}`; b.dataset.k = k;
         b.innerHTML = `<span class="opt-letter">${'ABCD'[k]}</span><span class="opt-text"></span>`;
-        b.querySelector('.opt-text').textContent = o;
+        b.querySelector('.opt-text').textContent = q.opts[o];
         if (p.wrong.includes(k)) { b.classList.add('wrong'); b.disabled = true; }
         opts.appendChild(b);
       });
@@ -1609,8 +1635,133 @@ html.compact .end-total{font-size:.95rem}
       startTimer(q.time);
       const f = q.type === 'mc' ? document.querySelector('.opt:not(:disabled)') : $('passBtn');
       if (f) f.focus({ preventScroll: true });
+      kApply();
     }
+    renderAntiChip();
     fitQuestion();
+  }
+  /* Answer positions are shuffled once per group, so "it's B" cannot be passed around. */
+  function permFor(p) {
+    if (!Array.isArray(p.perm) || p.perm.length !== 4) { p.perm = shuffle([0, 1, 2, 3]); save(); }
+    return p.perm;
+  }
+  const ansPos = (p, q) => permFor(p).indexOf(q.ans);
+
+  /* ---------- Anti-photo text ----------
+     The letters exist only as motion: inside the glyphs a field of dots drifts down, outside it drifts up.
+     Every single frame is the same even dots everywhere, so a phone photo (and an AI reading it) sees nothing. */
+  const KT = { items: [], t: 0, tiles: {} };
+  const kOn = () => !!state.anti;
+  function kTile(px, seed) {
+    const key = px + ':' + seed;
+    if (KT.tiles[key]) return KT.tiles[key];
+    const n = Math.max(24, Math.round(180 / px));
+    const c = document.createElement('canvas');
+    c.width = c.height = n * px;
+    const x = c.getContext('2d');
+    x.fillStyle = T.cream;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (Math.random() < .5) x.fillRect(i * px, j * px, px, px);
+    return (KT.tiles[key] = c);
+  }
+  function kWrap(ctx, text, w) {
+    const lines = [];
+    let cur = '';
+    text.split(/\s+/).filter(Boolean).forEach(word => {
+      const t = cur ? cur + ' ' + word : word;
+      if (!cur || ctx.measureText(t).width <= w) cur = t; else { lines.push(cur); cur = word; }
+    });
+    if (cur) lines.push(cur);
+    return lines.length ? lines : [''];
+  }
+  function kLayout(it) {
+    const cs = getComputedStyle(it.el);
+    const fs = parseFloat(cs.fontSize) || 20;
+    const lh = parseFloat(cs.lineHeight) || fs * 1.42;
+    const w = Math.max(20, it.el.clientWidth);
+    const font = `${cs.fontWeight} ${fs}px ${cs.fontFamily}`;
+    const m = it.mask.getContext('2d');
+    m.font = font;
+    const lines = kWrap(m, it.text, w);
+    const h = Math.ceil(lines.length * lh);
+    const res = Math.min(2, Math.max(.75, frameScale * (window.devicePixelRatio || 1)));
+    it.res = res;
+    it.cv.style.height = h + 'px';
+    const W = Math.max(1, Math.round(w * res)), H = Math.max(1, Math.round(h * res));
+    [it.cv, it.mask, it.tmp].forEach(c => { c.width = W; c.height = H; });
+    m.setTransform(res, 0, 0, res, 0, 0);
+    m.font = font; m.fillStyle = '#fff'; m.textBaseline = 'middle';
+    lines.forEach((ln, i) => m.fillText(ln, 0, i * lh + lh / 2));
+    const px = Math.max(1, Math.round(Math.max(1.6, fs / 13) * res));
+    const t1 = kTile(px, 1), t2 = kTile(px, 2);
+    it.pat1 = it.cv.getContext('2d').createPattern(t1, 'repeat');
+    it.pat2 = it.tmp.getContext('2d').createPattern(t2, 'repeat');
+    it.tileH = t1.height;
+    kDraw(it);
+  }
+  function kDraw(it) {
+    const c = it.cv.getContext('2d'), t = it.tmp.getContext('2d');
+    const W = it.cv.width, H = it.cv.height;
+    const off = (KT.t * it.res) % it.tileH;
+    c.globalCompositeOperation = 'source-over';
+    c.clearRect(0, 0, W, H);
+    it.pat1.setTransform(new DOMMatrix([1, 0, 0, 1, 0, -off]));
+    c.fillStyle = it.pat1;
+    c.fillRect(0, 0, W, H);
+    c.globalCompositeOperation = 'destination-out';
+    c.drawImage(it.mask, 0, 0);
+    t.globalCompositeOperation = 'source-over';
+    t.clearRect(0, 0, W, H);
+    it.pat2.setTransform(new DOMMatrix([1, 0, 0, 1, 0, off]));
+    t.fillStyle = it.pat2;
+    t.fillRect(0, 0, W, H);
+    t.globalCompositeOperation = 'destination-in';
+    t.drawImage(it.mask, 0, 0);
+    c.globalCompositeOperation = 'source-over';
+    c.drawImage(it.tmp, 0, 0);
+  }
+  function kMount(el, text) {
+    el.textContent = '';
+    el.classList.add('ktext');
+    const sr = document.createElement('span');
+    sr.className = 'sr-only';
+    sr.textContent = text;
+    const cv = document.createElement('canvas');
+    cv.setAttribute('aria-hidden', 'true');
+    el.append(sr, cv);
+    const it = { el, cv, text, mask: document.createElement('canvas'), tmp: document.createElement('canvas') };
+    KT.items.push(it);
+    kLayout(it);
+  }
+  function kClear() {
+    KT.items.forEach(it => { it.el.classList.remove('ktext'); it.el.textContent = it.text; });
+    KT.items = [];
+    $('qPanel').classList.remove('anti');
+  }
+  function kRelayout() { KT.items.forEach(kLayout); }
+  /* Protect the open question while it is being answered; plain text comes back once it is answered. */
+  function kApply() {
+    kClear();
+    if (!kOn() || !qLive) return;
+    const p = state.picked[qLive.pi], q = getQ(qLive.qi);
+    if (!p || !q || p.result != null) return;
+    $('qPanel').classList.add('anti');
+    kMount($('qText'), q.text);
+    if (q.type === 'mc') {
+      const order = permFor(p);
+      document.querySelectorAll('#options .opt').forEach((b, k) => kMount(b.querySelector('.opt-text'), q.opts[order[k]]));
+    }
+  }
+  function renderAntiChip() {
+    const chip = $('antiChip');
+    chip.hidden = false;
+    chip.setAttribute('aria-pressed', String(!!state.anti));
+    $('antiLabel').textContent = `Chống chụp ảnh: ${state.anti ? 'Bật' : 'Tắt'}`;
+  }
+  function toggleAnti() {
+    state.anti = !state.anti;
+    save();
+    renderAntiChip(); renderDrawer();
+    if (visibleScene === 'question' && qLive) { kApply(); fitQuestion(); }
   }
   function renderHintList(q) {
     const ul = $('hintList');
@@ -1634,8 +1785,9 @@ html.compact .end-total{font-size:.95rem}
     let k = 1;
     panel.style.zoom = '';
     panel.style.setProperty('--qs', '1');
+    kRelayout();
     const room = () => scene.clientHeight - 6;
-    while (panel.offsetHeight > room() && k > .68) { k -= .06; panel.style.setProperty('--qs', k.toFixed(2)); }
+    while (panel.offsetHeight > room() && k > .68) { k -= .06; panel.style.setProperty('--qs', k.toFixed(2)); kRelayout(); }
     const h = panel.offsetHeight, r = room();
     if (h > r) panel.style.zoom = Math.max(.45, r / h).toFixed(3);
   }
@@ -1664,7 +1816,7 @@ html.compact .end-total{font-size:.95rem}
     drumroll(1.5);
     setTimeout(() => {
       if (qLive !== live) return;
-      if (k === q.ans) { p.choice = k; finish(true, live); }
+      if (k === ansPos(p, q)) { p.choice = k; finish(true, live); }
       else wrongAttempt(k, live);
     }, reduced ? 300 : 1600);
   }
@@ -1721,8 +1873,9 @@ html.compact .end-total{font-size:.95rem}
     $('timerWrap').hidden = true;
     $('qKeys').hidden = true;
     $('qFeedback').hidden = true;
+    kClear();
     if (q.type === 'mc') {
-      const a = q.ans;
+      const a = ansPos(p, q);
       q.opts.forEach((o, k) => {
         const b = $(`opt-${k}`);
         b.disabled = true;
@@ -1943,6 +2096,10 @@ html.compact .end-total{font-size:.95rem}
     const sb = $('soundBtn');
     $('soundLabel').textContent = `Âm thanh: ${state.sound ? 'Bật' : 'Tắt'}`;
     sb.setAttribute('aria-pressed', String(state.sound));
+    const at = $('antiToggle');
+    at.textContent = state.anti ? 'Đang bật' : 'Đang tắt';
+    at.setAttribute('aria-pressed', String(!!state.anti));
+    at.disabled = false;
   }
   /* ---------- Question editor ---------- */
   let editing = null, delArmed = false, restoreArmed = false;
@@ -2070,6 +2227,7 @@ html.compact .end-total{font-size:.95rem}
     updateTimer(now);
     if (!reduced) drawMotes(dt, now);
     drawConfetti(dt);
+    if (KT.items.length) { KT.t += dt * 44; KT.items.forEach(kDraw); }
     requestAnimationFrame(loop);
   }
 
@@ -2100,6 +2258,9 @@ html.compact .end-total{font-size:.95rem}
     $('passBtn').addEventListener('click', () => judgeOpen(true));
     $('failBtn').addEventListener('click', () => judgeOpen(false));
     $('nextBtn').addEventListener('click', nextStep);
+    $('antiChip').addEventListener('click', toggleAnti);
+    $('antiToggle').addEventListener('click', toggleAnti);
+    if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => { if (KT.items.length) fitQuestion(); });
 
     $('soundBtn').addEventListener('click', () => { state.sound = !state.sound; if (state.sound) ensureAudio(); else stopSuspense(); renderDrawer(); save(); });
     const fsBtn = $('fsBtn');
