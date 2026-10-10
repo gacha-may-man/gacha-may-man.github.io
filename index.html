@@ -316,6 +316,11 @@ html.portrait .q-panel.anti .opt{font-size:calc(1.12rem * var(--qs,1))}
 .opt.dim{opacity:.32}
 .feedback{margin:0;padding:10px 16px;border-radius:14px;border:2px solid var(--bad);background:var(--panel);color:var(--bad-light);font:900 clamp(1.05rem,2cqw,1.4rem)/1.35 var(--font-display);animation:enter .35s ease-out}
 .judge{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.time-pick{display:inline-flex;align-items:center;gap:6px;padding:4px 5px 4px 14px;border:1.5px solid var(--line);border-radius:999px;background:var(--panel)}
+.time-pick-label{font-size:.74rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-right:4px}
+.chip-t{font:800 .95rem/1 var(--font-body);color:var(--cream);background:transparent;border:1.5px solid var(--gold-deep);border-radius:999px;padding:.55em .95em;cursor:pointer;font-variant-numeric:lining-nums tabular-nums}
+@media (hover:hover){.chip-t:hover{border-color:var(--gold)}}
+.chip-t[aria-pressed="true"]{background:linear-gradient(180deg,var(--glow),var(--gold) 55%,var(--gold-deep));color:var(--ink);border-color:var(--gold)}
 .q-result{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;justify-content:space-between;padding:14px 18px;border-radius:16px;border:2px solid var(--line);background:var(--panel)}
 .q-result.good{border-color:var(--good)}
 .q-result.bad{border-color:var(--bad)}
@@ -606,6 +611,12 @@ html.compact .rw-result .btn-gold{padding:.7em 1.3em}
         <div class="options" id="options"></div>
         <p class="feedback" id="qFeedback" hidden aria-live="assertive"></p>
         <div class="judge" id="judge" hidden>
+          <div class="time-pick" id="timePick" role="group" aria-label="Chọn thời gian trả lời">
+            <span class="time-pick-label">Thời gian</span>
+            <button class="chip-t" type="button" data-sec="15" aria-pressed="false">15s</button>
+            <button class="chip-t" type="button" data-sec="30" aria-pressed="false">30s</button>
+            <button class="chip-t" type="button" data-sec="60" aria-pressed="false">60s</button>
+          </div>
           <button class="btn" id="classClose" type="button">Quay lại trò chơi</button>
         </div>
         <div class="q-result" id="qResult" hidden>
@@ -1864,11 +1875,26 @@ html.compact .rw-result .btn-gold{padding:.7em 1.3em}
     $('judge').hidden = false;
     $('qResult').hidden = true;
     $('timerWrap').hidden = false;
+    renderTimePick(q.time);
     startTimer(q.time);
     kApply();
     renderAntiChip();
     fitQuestion();
     $('classClose').focus({ preventScroll: true });
+  }
+  function renderTimePick(sec) {
+    document.querySelectorAll('#timePick .chip-t').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.sec) === sec)));
+  }
+  /* A time chip restarts the countdown with that length and keeps it for the next time the class question opens. */
+  function pickClassTime(sec) {
+    if (!qLive || !qLive.cls || busy) return;
+    ensureAudio();
+    state.bank.special.time = sec;
+    save();
+    renderTimePick(sec);
+    pickSound();
+    startTimer(sec);
+    renderDrawer();
   }
   function closeClass() {
     if (busy || state.scene !== 'class') return;
@@ -2294,6 +2320,7 @@ html.compact .rw-result .btn-gold{padding:.7em 1.3em}
     $('options').addEventListener('click', e => { const b = e.target.closest('.opt'); if (b && !b.disabled) answer(Number(b.dataset.k)); });
     $('classBtn').addEventListener('click', openClass);
     $('classClose').addEventListener('click', closeClass);
+    $('timePick').addEventListener('click', e => { const b = e.target.closest('.chip-t'); if (b) pickClassTime(Number(b.dataset.sec)); });
     $('rwDeal').addEventListener('click', e => { const b = e.target.closest('.card'); if (b && !b.disabled) rwPick(Number(b.dataset.k)); });
     $('rwNext').addEventListener('click', rwNext);
     $('rwShuffle').addEventListener('click', rwDoShuffle);
